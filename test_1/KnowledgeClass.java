@@ -89,16 +89,16 @@ public class KnowledgeClass {
 
 		// --- ランダム戦略（30の倍数ラウンド） ---
 		if (roundCount % 30 == 0) {
-			decision = rand.nextBoolean() ? "y" : "n";
+			decision = rand.nextBoolean() ? "c" : "d";
 			return decision;
 		}
 
 		// --- 保守戦略（1〜20ラウンド） ---
 		if (roundCount <= 20) {
 			if (current.opponent_card > 3) {
-				decision = "n"; // 弱い手札なら降りる
+				decision = "d"; // 弱い手札なら降りる
 			} else {
-				decision = "y";
+				decision = "c";
 			}
 			return decision;
 		}
@@ -115,9 +115,9 @@ public class KnowledgeClass {
 		double opponentAvg = validCount > 0 ? opponentCardSum / validCount : 3;
 
 		if (current.my_card > opponentAvg) {
-			decision = "y";
+			decision = "c";
 		} else {
-			decision = "n";
+			decision = "d";
 		}
 
 		return decision;
