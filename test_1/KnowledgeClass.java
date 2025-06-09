@@ -43,7 +43,6 @@ public class KnowledgeClass {
             int myCardValue = Character.getNumericValue(current.my_card);
             int predictedOpponentCard = predictOpponentCard();
 
-            // 相手のカード予測値に基づく動的ビッド
             // 自分のカードが強いほど、より積極的にビッドする（ただし上限はMAX_BID_LIMIT）
             if (myCardValue >= 8) { // 自分のカードが非常に強い
                 b = Math.min(current.my_money / 2 + 1, Math.min(current.my_money, current.opponent_money));
@@ -73,7 +72,8 @@ public class KnowledgeClass {
         decision = "n"; // 初期化
 
         int myCardValue = Character.getNumericValue(current.my_card);
-        int opponentCardValue = Character.getNumericValue(current.opponent_card); // 相手のカードは通常不明だが、比較のためにint化
+        // opponentCardValueは通常不明だが、比較のためにint化
+        // int opponentCardValue = Character.getNumericValue(current.opponent_card); // Note: This will be 0 if unknown
 
         // 30ラウンドごとのランダム干渉
         if (roundCounter % 30 == 0) {
@@ -95,15 +95,28 @@ public class KnowledgeClass {
             int predictedOpponentCard = predictOpponentCard();
 
             // 相手の行動パターン分析
-            boolean isBluffing = detectBluffPattern();
+            boolean isBluffing = detectBluffPattern(); // ブラフ検出
 
-            // 相手の予測カードが自分のカードより強く、かつブラフではない場合ドロップ
-            // または、自分のカードが非常に弱く、相手のビッドが高い場合もドロップを検討
+            // デフォルトはコールとする
+            decision = "c";
+
+            // ドロップする条件：
+            // 1. 相手の予測カードが自分のカードより強く、かつブラフではない場合
+            // 2. 自分のカードが非常に弱く（例: 3以下）、相手のビッドが自己資金の1/3を超える場合（ブラフでなくてもリスクが高すぎる）
             if ((predictedOpponentCard > myCardValue && !isBluffing) ||
                 (myCardValue <= 3 && current.opponent_bid > current.my_money / 3)) {
                 decision = "d";
-            } else {
-                decision = "c"; // それ以外はコール
+            }
+
+            // ブラフが検出された場合、コールに強く傾倒する
+            if (isBluffing) {
+                // ただし、自分のカードが非常に弱く、相手のビッドが自己資金の半分を超えるような極端な状況では、
+                // ブラフであってもドロップする可能性がある
+                if (myCardValue <= 2 && current.opponent_bid > current.my_money / 2) {
+                    decision = "d"; // 絶望的な状況ではドロップ
+                } else {
+                    decision = "c"; // それ以外の場合はブラフをコール
+                }
             }
         }
 
@@ -132,25 +145,35 @@ public class KnowledgeClass {
 
     // ブラフ検出メソッド
     private boolean detectBluffPattern() {
-        int highBidLowCardCount = 0;
+        int generalHighBidLowCardCount = 0; // 一般的なブラフパターン (高ビッド + 低カード)
+        int maxBidSmallCardBluffCount = 0; // 特定のブラフパターン (ビッド5 + 非常に小さなカード)
         int totalAnalyzedCases = 0;
 
         for (InfoClass h : history) {
             // カード情報とビッド情報が有効な場合のみ分析
             if (h.opponent_card != '0' && h.opponent_bid > 0) {
                 int historicalOpponentCard = Character.getNumericValue(h.opponent_card);
-                if (historicalOpponentCard >= 1 && historicalOpponentCard <= 9) {
-                    // 低カード(1-5)で高ビッド(自己資金の1/3超)を検出
+                if (historicalOpponentCard >= 1 && historicalOpponentCard <= 9) { // 有効なカード値のみ
+                    // 1. 一般的なブラフ検出: 低カード(1-5)で比較的高いビッド(自己資金の1/3超)
                     if (historicalOpponentCard <= 5 && h.opponent_bid > h.opponent_money / 3) {
-                        highBidLowCardCount++;
+                        generalHighBidLowCardCount++;
+                    }
+                    // 2. 特定のブラフ検出: ビッド額が最大(5)かつカードが非常に小さい(1-3)
+                    if (h.opponent_bid == MAX_BID_LIMIT && historicalOpponentCard <= 3) {
+                        maxBidSmallCardBluffCount++;
                     }
                     totalAnalyzedCases++;
                 }
             }
         }
 
-        // 十分なデータがあり、かつブラフの傾向が高い場合（50%超）
-        return totalAnalyzedCases > 3 && highBidLowCardCount * 2 > totalAnalyzedCases;
+        // 十分なデータがある場合にブラフを判定
+        // - 一般的なブラフの傾向が強い (50%超)
+        // - または、最大ビッドでの小さなカードのブラフが顕著 (33%超)
+        boolean generalBluffLikely = totalAnalyzedCases > 3 && generalHighBidLowCardCount * 2 > totalAnalyzedCases;
+        boolean maxBidBluffLikely = totalAnalyzedCases > 2 && maxBidSmallCardBluffCount * 3 > totalAnalyzedCases;
+
+        return generalBluffLikely || maxBidBluffLikely;
     }
 
     // historyに直前のゲーム情報 previous を格納する
