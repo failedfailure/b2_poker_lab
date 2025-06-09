@@ -39,24 +39,32 @@ public class KnowledgeClass {
             b = Math.min(b, MAX_BID_LIMIT); // ランダムビッドも最大値制限に従う
         } else {
             // フェーズ2: 学習反演戦略
-            // 自分のカードと相手の予測カードに基づいてビッド額を決定
             int myCardValue = Character.getNumericValue(current.my_card);
             int predictedOpponentCard = predictOpponentCard();
 
-            // 自分のカードが強いほど、より積極的にビッドする（ただし上限はMAX_BID_LIMIT）
-            if (myCardValue >= 8) { // 自分のカードが非常に強い
-                b = Math.min(current.my_money / 2 + 1, Math.min(current.my_money, current.opponent_money));
-            } else if (myCardValue >= 6) { // 自分のカードが中程度に強い
-                b = Math.min(current.my_money / 3 + 1, Math.min(current.my_money, current.opponent_money));
-            } else { // 自分のカードが弱い
-                b = Math.min(current.my_money / 4 + 1, Math.min(current.my_money, current.opponent_money));
+            // **変更点:** 自分のカードの強さに応じて、ビッド額を1からMAX_BID_LIMITの範囲でマッピング
+            // myCardValue (1-9) を MAX_BID_LIMIT (1-5) に線形マッピング
+            // 例: カード1 -> ビッド1, カード9 -> ビッド5
+            b = 1 + (int) Math.round(((double)(myCardValue - 1) / (9 - 1)) * (MAX_BID_LIMIT - 1));
+            b = Math.max(1, b); // 少なくとも1であることを保証
+
+            // 相手の予測カードや状況に応じて微調整
+            // 相手のカードが弱いと予測される場合、少し強気に（ただしMAX_BID_LIMITを超えない）
+            if (predictedOpponentCard < 5) {
+                b = Math.min(b + 1, MAX_BID_LIMIT);
             }
-            // 相手の予測カードも考慮して調整
-            if (predictedOpponentCard < 5) { // 相手のカードが弱いと予測される場合、少し強気に
-                b = Math.min(b + 1, Math.min(current.my_money, current.opponent_money));
+            // 自分の残金が少ない場合、ビッドを抑える
+            // これは最終チェックでも行われるが、計算過程で考慮することでより安全に
+            if (current.my_money < b) {
+                b = current.my_money;
+            }
+            // 相手の残金が少ない場合、ビッドを相手の残金に合わせる
+            if (current.opponent_money < b) {
+                b = current.opponent_money;
             }
 
-            b = Math.min(b, MAX_BID_LIMIT); // 計算されたビッドを最大値制限に合わせる
+            // 最終的にMAX_BID_LIMITを超えないことを保証
+            b = Math.min(b, MAX_BID_LIMIT);
         }
 
         // 最終的なビッド額のチェック (残金を超えない、最低1を保証)
@@ -72,8 +80,6 @@ public class KnowledgeClass {
         decision = "n"; // 初期化
 
         int myCardValue = Character.getNumericValue(current.my_card);
-        // opponentCardValueは通常不明だが、比較のためにint化
-        // int opponentCardValue = Character.getNumericValue(current.opponent_card); // Note: This will be 0 if unknown
 
         // 30ラウンドごとのランダム干渉
         if (roundCounter % 30 == 0) {
@@ -170,7 +176,7 @@ public class KnowledgeClass {
         // 十分なデータがある場合にブラフを判定
         // - 一般的なブラフの傾向が強い (50%超)
         // - または、最大ビッドでの小さなカードのブラフが顕著 (33%超)
-        boolean generalBluffLikely = totalAnalyzedCases > 3 && generalHighBidLowCardCount * 2 > totalAnalyzedCases;
+        boolean generalBluffLikely = totalAnalyaledCases > 3 && generalHighBidLowCardCount * 2 > totalAnalyzedCases;
         boolean maxBidBluffLikely = totalAnalyzedCases > 2 && maxBidSmallCardBluffCount * 3 > totalAnalyzedCases;
 
         return generalBluffLikely || maxBidBluffLikely;
