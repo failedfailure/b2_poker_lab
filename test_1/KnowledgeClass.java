@@ -22,6 +22,57 @@ public class KnowledgeClass {
         }
     }
 
+    /**
+     * カードの文字表現を標準的なポーカーの順位に基づいた数値に変換する。
+     * A > K > Q > J > T > 9 > 8 > 7 > 6 > 5 > 4 > 3 > 2 の順で、Aが最も高い。
+     * これはカードの一般的な"強さ"を評価するために使用される。
+     * @param card 変換するカード文字 (例: 'A', 'K', '2', '7')
+     * @return 標準順位に基づくカードの強さを示す数値 (A=14, K=13, ..., 2=2)
+     */
+    private int getStandardRankValue(char card) {
+        switch (card) {
+            case 'A': return 14; // 最も強い（通常時）
+            case 'K': return 13;
+            case 'Q': return 12;
+            case 'J': return 11;
+            case 'T': return 10; // '10' は 'T' で表されると仮定
+            case '9': return 9;
+            case '8': return 8;
+            case '7': return 7;
+            case '6': return 6;
+            case '5': return 5;
+            case '4': return 4;
+            case '3': return 3;
+            case '2': return 2; // 最も弱い（通常時）
+            default: return 0; // 不明なカードや初期値 ('0')
+        }
+    }
+
+    /**
+     * 二枚のカードをゲームの特殊な勝利ルールに基づいて比較する。
+     * ルール: A > K > Q > J > T > 9 > 8 > 7 > 6 > 5 > 4 > 3 > 2 が基本だが、
+     * 特殊な条件として「2はAにのみ勝つ」。
+     * @param card1 比較する最初のカード
+     * @param card2 比較する2番目のカード
+     * @return card1が勝つ場合は正の値、card2が勝つ場合は負の値、引き分けの場合は0 (通常は発生しない)
+     */
+    private int compareCards(char card1, char card2) {
+        // 特殊ルール: '2' は 'A' にのみ勝つ
+        if (card1 == '2' && card2 == 'A') {
+            return 1; // card1 ('2') が card2 ('A') に勝つ
+        }
+        if (card1 == 'A' && card2 == '2') {
+            return -1; // card2 ('2') が card1 ('A') に勝つ
+        }
+
+        // それ以外の全てのケースでは標準の順位で比較
+        int rank1 = getStandardRankValue(card1);
+        int rank2 = getStandardRankValue(card2);
+
+        return rank1 - rank2; // rank1がrank2より大きければ正、小さければ負、等しければ0
+    }
+
+
     public String bid() {
         roundCounter++; // ラウンド数を更新
         HistoryUpdate();
@@ -39,22 +90,23 @@ public class KnowledgeClass {
             b = Math.min(b, MAX_BID_LIMIT); // ランダムビッドも最大値制限に従う
         } else {
             // フェーズ2: 学習反演戦略
-            int myCardValue = Character.getNumericValue(current.my_card);
-            int predictedOpponentCard = predictOpponentCard();
+            int myCardStandardRank = getStandardRankValue(current.my_card);
+            int predictedOpponentCardStandardRank = predictOpponentCard();
 
-            // **変更点:** 自分のカードの強さに応じて、ビッド額を1からMAX_BID_LIMITの範囲でマッピング
-            // myCardValue (1-9) を MAX_BID_LIMIT (1-5) に線形マッピング
-            // 例: カード1 -> ビッド1, カード9 -> ビッド5
-            b = 1 + (int) Math.round(((double)(myCardValue - 1) / (9 - 1)) * (MAX_BID_LIMIT - 1));
+            // **変更点:** 自分のカードの強さに応じて、ビッド額を1からMAX_BID_LIMIT-1の範囲でマッピング
+            // 最高ランクのカード（'A'）でも、ベースビッドはMAX_BID_LIMIT-1 (4) になるようにする
+            final int MAX_BID_BASE_TARGET = MAX_BID_LIMIT - 1; // ベースビッドの最大ターゲット値 (例: 4)
+
+            b = 1 + (int) Math.round(((double)(myCardStandardRank - getStandardRankValue('2')) / (getStandardRankValue('A') - getStandardRankValue('2'))) * (MAX_BID_BASE_TARGET - 1));
             b = Math.max(1, b); // 少なくとも1であることを保証
 
             // 相手の予測カードや状況に応じて微調整
-            // 相手のカードが弱いと予測される場合、少し強気に（ただしMAX_BID_LIMITを超えない）
-            if (predictedOpponentCard < 5) {
-                b = Math.min(b + 1, MAX_BID_LIMIT);
+            // **変更点:** 相手のカードが非常に弱い（標準ランクで'4'以下）と予測される場合のみ、ベースビッドに+1する
+            // これで初めてMAX_BID_LIMIT (5) に達する可能性がある
+            if (predictedOpponentCardStandardRank <= getStandardRankValue('4')) {
+                b = Math.min(b + 1, MAX_BID_LIMIT); // MAX_BID_LIMITを超えないように
             }
             // 自分の残金が少ない場合、ビッドを抑える
-            // これは最終チェックでも行われるが、計算過程で考慮することでより安全に
             if (current.my_money < b) {
                 b = current.my_money;
             }
@@ -63,7 +115,7 @@ public class KnowledgeClass {
                 b = current.opponent_money;
             }
 
-            // 最終的にMAX_BID_LIMITを超えないことを保証
+            // 最終的にMAX_BID_LIMITを超えないことを保証 (二重チェックだが安全のため残す)
             b = Math.min(b, MAX_BID_LIMIT);
         }
 
@@ -79,7 +131,7 @@ public class KnowledgeClass {
     public String decision() {
         decision = "n"; // 初期化
 
-        int myCardValue = Character.getNumericValue(current.my_card);
+        int myCardStandardRank = getStandardRankValue(current.my_card);
 
         // 30ラウンドごとのランダム干渉
         if (roundCounter % 30 == 0) {
@@ -88,9 +140,8 @@ public class KnowledgeClass {
 
         // フェーズ1: 極めて保守的な戦略 (生存優先)
         if (roundCounter <= DEFENSIVE_ROUNDS_LIMIT) {
-            // 自分のカードが8または9の場合のみコールを検討
-            // それ以外は常にドロップしてリスクを最小化
-            if (myCardValue >= 8) {
+            // 自分のカードが'A'以上の標準ランク（つまり'A'）の場合のみコールを検討
+            if (myCardStandardRank >= getStandardRankValue('A')) {
                 decision = "c"; // 強いカードならコール
             } else {
                 decision = "d"; // それ以外はドロップ
@@ -98,7 +149,7 @@ public class KnowledgeClass {
         }
         // フェーズ2: 学習反演戦略 (20ラウンド以降)
         else {
-            int predictedOpponentCard = predictOpponentCard();
+            int predictedOpponentCardStandardRank = predictOpponentCard();
 
             // 相手の行動パターン分析
             boolean isBluffing = detectBluffPattern(); // ブラフ検出
@@ -107,18 +158,20 @@ public class KnowledgeClass {
             decision = "c";
 
             // ドロップする条件：
-            // 1. 相手の予測カードが自分のカードより強く、かつブラフではない場合
-            // 2. 自分のカードが非常に弱く（例: 3以下）、相手のビッドが自己資金の1/3を超える場合（ブラフでなくてもリスクが高すぎる）
-            if ((predictedOpponentCard > myCardValue && !isBluffing) ||
-                (myCardValue <= 3 && current.opponent_bid > current.my_money / 3)) {
+            // 1. 相手の予測カード（標準ランク）が自分のカード（標準ランク）より強く、かつブラフではない場合
+            //    注意: predictOpponentCardはcharではなくintランクを返すため、compareCardsは直接適用できない
+            //    ここでは予測ランクに基づいて一般的な優劣を判断する
+            // 2. 自分のカードが非常に弱く（例: '3'以下）、相手のビッドが自己資金の1/3を超える場合（ブラフでなくてもリスクが高すぎる）
+            if ((predictedOpponentCardStandardRank > myCardStandardRank && !isBluffing) ||
+                (myCardStandardRank <= getStandardRankValue('3') && current.opponent_bid > current.my_money / 3)) {
                 decision = "d";
             }
 
             // ブラフが検出された場合、コールに強く傾倒する
             if (isBluffing) {
-                // ただし、自分のカードが非常に弱く、相手のビッドが自己資金の半分を超えるような極端な状況では、
+                // ただし、自分のカードが非常に弱く（例: '4'以下）、相手のビッドが自己資金の半分を超えるような極端な状況では、
                 // ブラフであってもドロップする可能性がある
-                if (myCardValue <= 2 && current.opponent_bid > current.my_money / 2) {
+                if (myCardStandardRank <= getStandardRankValue('4') && current.opponent_bid > current.my_money / 2) {
                     decision = "d"; // 絶望的な状況ではドロップ
                 } else {
                     decision = "c"; // それ以外の場合はブラフをコール
@@ -130,26 +183,28 @@ public class KnowledgeClass {
     }
 
     // 相手のカード予測メソッド
+    // このメソッドは、相手のカードの"標準的な強さ"を予測する
     private int predictOpponentCard() {
         int sameBidCount = 0;
-        int cardSum = 0;
+        int cardStrengthSum = 0;
 
         for (InfoClass h : history) {
-            // 履歴のopponent_cardが有効な数字文字('1'〜'9')であり、かつビッド額が一致する場合のみ考慮
-            if (h.opponent_card != '0' && h.opponent_bid == current.opponent_bid) {
-                int historicalOpponentCard = Character.getNumericValue(h.opponent_card);
-                if (historicalOpponentCard >= 1 && historicalOpponentCard <= 9) { // 実際のカード値の範囲チェック
+            // 履歴のopponent_cardが有効なカード文字であり、かつビッド額が一致する場合のみ考慮
+            if (h.opponent_card != '0' && h.opponent_bid > 0) { // Also ensure bid was valid
+                int historicalOpponentCardStandardRank = getStandardRankValue(h.opponent_card);
+                if (historicalOpponentCardStandardRank > 0) { // getStandardRankValueが0を返す場合は不正なカード
                     sameBidCount++;
-                    cardSum += historicalOpponentCard;
+                    cardStrengthSum += historicalOpponentCardStandardRank;
                 }
             }
         }
 
-        // データがない場合は中央値5を返す
-        return sameBidCount > 0 ? cardSum / sameBidCount : 5;
+        // データがない場合は中央値に近い強さ（例: '7'の標準ランク）を返す
+        return sameBidCount > 0 ? cardStrengthSum / sameBidCount : getStandardRankValue('7');
     }
 
     // ブラフ検出メソッド
+    // このメソッドも、相手のカードの"標準的な強さ"に基づいてブラフパターンを検出する
     private boolean detectBluffPattern() {
         int generalHighBidLowCardCount = 0; // 一般的なブラフパターン (高ビッド + 低カード)
         int maxBidSmallCardBluffCount = 0; // 特定のブラフパターン (ビッド5 + 非常に小さなカード)
@@ -158,14 +213,14 @@ public class KnowledgeClass {
         for (InfoClass h : history) {
             // カード情報とビッド情報が有効な場合のみ分析
             if (h.opponent_card != '0' && h.opponent_bid > 0) {
-                int historicalOpponentCard = Character.getNumericValue(h.opponent_card);
-                if (historicalOpponentCard >= 1 && historicalOpponentCard <= 9) { // 有効なカード値のみ
-                    // 1. 一般的なブラフ検出: 低カード(1-5)で比較的高いビッド(自己資金の1/3超)
-                    if (historicalOpponentCard <= 5 && h.opponent_bid > h.opponent_money / 3) {
+                int historicalOpponentCardStandardRank = getStandardRankValue(h.opponent_card);
+                if (historicalOpponentCardStandardRank > 0) { // 有効なカード強さのみ
+                    // 1. 一般的なブラフ検出: 低カード（標準ランクで'5'以下）で比較的高いビッド(自己資金の1/3超)
+                    if (historicalOpponentCardStandardRank <= getStandardRankValue('5') && h.opponent_bid > h.opponent_money / 3) {
                         generalHighBidLowCardCount++;
                     }
-                    // 2. 特定のブラフ検出: ビッド額が最大(5)かつカードが非常に小さい(1-3)
-                    if (h.opponent_bid == MAX_BID_LIMIT && historicalOpponentCard <= 3) {
+                    // 2. 特定のブラフ検出: ビッド額が最大(5)かつカードが非常に小さい（標準ランクで'4'以下）
+                    if (h.opponent_bid == MAX_BID_LIMIT && historicalOpponentCardStandardRank <= getStandardRankValue('4')) {
                         maxBidSmallCardBluffCount++;
                     }
                     totalAnalyzedCases++;
@@ -176,7 +231,7 @@ public class KnowledgeClass {
         // 十分なデータがある場合にブラフを判定
         // - 一般的なブラフの傾向が強い (50%超)
         // - または、最大ビッドでの小さなカードのブラフが顕著 (33%超)
-        boolean generalBluffLikely = totalAnalyaledCases > 3 && generalHighBidLowCardCount * 2 > totalAnalyzedCases;
+        boolean generalBluffLikely = totalAnalyzedCases > 3 && generalHighBidLowCardCount * 2 > totalAnalyzedCases;
         boolean maxBidBluffLikely = totalAnalyzedCases > 2 && maxBidSmallCardBluffCount * 3 > totalAnalyzedCases;
 
         return generalBluffLikely || maxBidBluffLikely;
