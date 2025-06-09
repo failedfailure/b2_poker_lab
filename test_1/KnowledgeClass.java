@@ -50,6 +50,11 @@ public class KnowledgeClass {
             }
         }
 
+        // ビッド額のチェック
+        if (b > current.opponent_money) b = current.opponent_money;
+        if (b > current.my_money) b = current.my_money;
+        if (b < 1) b = 1; // 最低ビッド額保証
+
         bid = "" + b;
         return bid;
     }
@@ -64,7 +69,9 @@ public class KnowledgeClass {
 
         // フェーズ1: 保守戦略 (生存優先)
         if (roundCounter <= 20) {
-            if (current.opponent_card > current.my_card || current.opponent_bid > current.my_money/3) {
+            // 相手のカードが強い or ビッド額が自己資金の1/3超ならドロップ
+            if (current.opponent_card > current.my_card || 
+                current.opponent_bid > current.my_money/3) {
                 decision = "d";
             } else {
                 decision = "c";
@@ -77,6 +84,7 @@ public class KnowledgeClass {
             // 相手の行動パターン分析
             boolean isBluffing = detectBluffPattern();
             
+            // 相手のカードが強く、ブラフでない場合はドロップ
             if (predictedOpponentCard > current.my_card && !isBluffing) {
                 decision = "d";
             } else {
@@ -94,13 +102,14 @@ public class KnowledgeClass {
         int cardSum = 0;
         
         for (InfoClass h : history) {
-            if (h.opponent_bid == current.opponent_bid) {
+            if (h.opponent_bid == current.opponent_bid && h.opponent_card > 0) {
                 sameBidCount++;
                 cardSum += h.opponent_card;
             }
         }
         
-        return sameBidCount > 0 ? cardSum / sameBidCount : 5; // デフォルト値5
+        // デフォルト値5（中央値）
+        return sameBidCount > 0 ? cardSum / sameBidCount : 5;
     }
 
     // ブラフ検出メソッド
@@ -109,32 +118,39 @@ public class KnowledgeClass {
         int totalCases = 0;
         
         for (InfoClass h : history) {
-            if (h.opponent_card < 5 && h.opponent_bid > h.opponent_money/3) {
-                highBidLowCard++;
+            // カード情報が有効な場合のみ分析
+            if (h.opponent_card > 0 && h.opponent_bid > 0) {
+                // 低カード(1-5)で高ビッド(自己資金の1/3超)を検出
+                if (h.opponent_card < 6 && h.opponent_bid > h.opponent_money/3) {
+                    highBidLowCard++;
+                }
+                totalCases++;
             }
-            totalCases++;
         }
         
-        return totalCases > 0 && highBidLowCard * 2 > totalCases; // 50%超でブラフ判定
+        // 50%超でブラフ判定
+        return totalCases > 2 && highBidLowCard * 2 > totalCases;
     }
 
     private void HistoryUpdate() {
+        // 履歴をシフト
         for (int i = history.length - 2; i >= 0; i--) {
             history[i + 1] = CopyInfo(history[i]);
         }
+        // 直前のゲーム情報を履歴に追加
         history[0] = CopyInfo(previous);
     }
 
-    private InfoClass CopyInfo(InfoClass Info) {
+    private InfoClass CopyInfo(InfoClass info) {
         InfoClass tmpInfo = new InfoClass();
-        tmpInfo.my_bid = Info.my_bid;
-        tmpInfo.my_card = Info.my_card;
-        tmpInfo.my_decision = Info.my_decision;
-        tmpInfo.my_money = Info.my_money;
-        tmpInfo.opponent_bid = Info.opponent_bid;
-        tmpInfo.opponent_card = Info.opponent_card;
-        tmpInfo.opponent_decision = Info.opponent_decision;
-        tmpInfo.opponent_money = Info.opponent_money;
+        tmpInfo.my_bid = info.my_bid;
+        tmpInfo.my_card = info.my_card;
+        tmpInfo.my_decision = info.my_decision;
+        tmpInfo.my_money = info.my_money;
+        tmpInfo.opponent_bid = info.opponent_bid;
+        tmpInfo.opponent_card = info.opponent_card;
+        tmpInfo.opponent_decision = info.opponent_decision;
+        tmpInfo.opponent_money = info.opponent_money;
         return tmpInfo;
     }
 }
