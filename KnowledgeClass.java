@@ -27,7 +27,7 @@ public class KnowledgeClass {
      * A > K > Q > J > T > 9 > 8 > 7 > 6 > 5 > 4 > 3 > 2 の順で、Aが最も高い。
      * これはカードの一般的な"強さ"を評価するために使用される。
      * @param card 変換するカード文字 (例: 'A', 'K', '2', '7')
-     * @return 標準順位に基づくカードの強さを示す数値 (A=14, K=13, ..., 2=2)
+     * @return 標準順位に基づくカードの強さを示す数値 (A=14, K=13, ..., 2=2)。不正なカードは0を返す。
      */
     private int getStandardRankValue(char card) {
         switch (card) {
@@ -44,7 +44,8 @@ public class KnowledgeClass {
             case '4': return 4;
             case '3': return 3;
             case '2': return 2; // 最も弱い（通常時）
-            default: return 0; // 不明なカードや初期値 ('0')
+            case '0': return 0; // 不明なカードを示す文字
+            default: return 0; // その他不正な文字
         }
     }
 
@@ -68,6 +69,11 @@ public class KnowledgeClass {
         // それ以外の全てのケースでは標準の順位で比較
         int rank1 = getStandardRankValue(card1);
         int rank2 = getStandardRankValue(card2);
+
+        // 不正なカード値の場合は比較できない
+        if (rank1 == 0 || rank2 == 0) {
+            return 0; // またはエラーを投げるべきだが、ここでは引き分けとして扱う
+        }
 
         return rank1 - rank2; // rank1がrank2より大きければ正、小さければ負、等しければ0
     }
@@ -93,17 +99,22 @@ public class KnowledgeClass {
             int myCardStandardRank = getStandardRankValue(current.my_card);
             int predictedOpponentCardStandardRank = predictOpponentCard();
 
-            // **変更点:** 自分のカードの強さに応じて、ビッド額を1からMAX_BID_LIMIT-1の範囲でマッピング
+            // 自分のカードの強さに応じて、ビッド額を1からMAX_BID_LIMIT-1の範囲でマッピング
             // 最高ランクのカード（'A'）でも、ベースビッドはMAX_BID_LIMIT-1 (4) になるようにする
             final int MAX_BID_BASE_TARGET = MAX_BID_LIMIT - 1; // ベースビッドの最大ターゲット値 (例: 4)
 
-            b = 1 + (int) Math.round(((double)(myCardStandardRank - getStandardRankValue('2')) / (getStandardRankValue('A') - getStandardRankValue('2'))) * (MAX_BID_BASE_TARGET - 1));
-            b = Math.max(1, b); // 少なくとも1であることを保証
+            // myCardStandardRankが有効な範囲内か確認 (2から14)
+            if (myCardStandardRank < getStandardRankValue('2')) { // 例えば '0' の場合
+                b = 1; // 最小ビッドに設定
+            } else {
+                b = 1 + (int) Math.round(((double)(myCardStandardRank - getStandardRankValue('2')) / (getStandardRankValue('A') - getStandardRankValue('2'))) * (MAX_BID_BASE_TARGET - 1));
+                b = Math.max(1, b); // 少なくとも1であることを保証
+            }
+
 
             // 相手の予測カードや状況に応じて微調整
-            // **変更点:** 相手のカードが非常に弱い（標準ランクで'4'以下）と予測される場合のみ、ベースビッドに+1する
-            // これで初めてMAX_BID_LIMIT (5) に達する可能性がある
-            if (predictedOpponentCardStandardRank <= getStandardRankValue('4')) {
+            // 相手のカードが非常に弱い（標準ランクで'4'以下）と予測される場合のみ、ベースビッドに+1する
+            if (predictedOpponentCardStandardRank > 0 && predictedOpponentCardStandardRank <= getStandardRankValue('4')) { // 予測ランクが有効な場合のみ適用
                 b = Math.min(b + 1, MAX_BID_LIMIT); // MAX_BID_LIMITを超えないように
             }
             // 自分の残金が少ない場合、ビッドを抑える
@@ -159,8 +170,8 @@ public class KnowledgeClass {
 
             // ドロップする条件：
             // 1. 相手の予測カード（標準ランク）が自分のカード（標準ランク）より強く、かつブラフではない場合
-            //    注意: predictOpponentCardはcharではなくintランクを返すため、compareCardsは直接適用できない
-            //    ここでは予測ランクに基づいて一般的な優劣を判断する
+            //    注意: predictOpponentCardはcharではなくintランクを返すため、compareCardsは直接適用できない。
+            //    ここでは予測ランクに基づいて一般的な優劣を判断する。
             // 2. 自分のカードが非常に弱く（例: '3'以下）、相手のビッドが自己資金の1/3を超える場合（ブラフでなくてもリスクが高すぎる）
             if ((predictedOpponentCardStandardRank > myCardStandardRank && !isBluffing) ||
                 (myCardStandardRank <= getStandardRankValue('3') && current.opponent_bid > current.my_money / 3)) {
@@ -190,7 +201,7 @@ public class KnowledgeClass {
 
         for (InfoClass h : history) {
             // 履歴のopponent_cardが有効なカード文字であり、かつビッド額が一致する場合のみ考慮
-            if (h.opponent_card != '0' && h.opponent_bid > 0) { // Also ensure bid was valid
+            if (h.opponent_card != '0' && h.opponent_bid > 0) {
                 int historicalOpponentCardStandardRank = getStandardRankValue(h.opponent_card);
                 if (historicalOpponentCardStandardRank > 0) { // getStandardRankValueが0を返す場合は不正なカード
                     sameBidCount++;
