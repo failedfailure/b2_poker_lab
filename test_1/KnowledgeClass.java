@@ -1,4 +1,3 @@
-/* 知識クラス */
 import java.lang.Math;
 import java.util.Random;
 
@@ -7,12 +6,15 @@ public class KnowledgeClass {
     InfoClass current = new InfoClass();
     InfoClass previous = new InfoClass();
     InfoClass[] history = new InfoClass[10];
-    
+
     String decision;
     String bid;
-    
+
     private int roundCounter = 0; // ゲームラウンドカウンタ
     private final Random random = new Random(); // 乱数生成器
+
+    private final int DEFENSIVE_ROUNDS_LIMIT = 20; // 守備的に振る舞うラウンド数
+    private final int MAX_BID_LIMIT = 5; // ビッド額の最大値
 
     KnowledgeClass() {
         for (int i = 0; i < history.length; i++) {
@@ -28,29 +30,37 @@ public class KnowledgeClass {
         bid = "";
 
         // 戦略選択ロジック
-        if (roundCounter <= 20) {
-            // フェーズ1: 保守戦略 (最小ビッド)
+        if (roundCounter <= DEFENSIVE_ROUNDS_LIMIT) {
+            // フェーズ1: 極めて保守的な戦略 (常に最小ビッド1)
             b = 1;
-        } 
-        else if (roundCounter % 30 == 0) {
-            // フェーズ3: 30ラウンドごとのランダム干渉
+        } else if (roundCounter % 30 == 0) {
+            // フェーズ3: 30ラウンドごとのランダム干渉 (ビッド額も最大5に制限)
             b = random.nextInt(Math.min(current.my_money, current.opponent_money)) + 1;
-        }
-        else {
+            b = Math.min(b, MAX_BID_LIMIT); // ランダムビッドも最大値制限に従う
+        } else {
             // フェーズ2: 学習反演戦略
+            // 自分のカードと相手の予測カードに基づいてビッド額を決定
+            int myCardValue = Character.getNumericValue(current.my_card);
             int predictedOpponentCard = predictOpponentCard();
-            
+
             // 相手のカード予測値に基づく動的ビッド
-            if (predictedOpponentCard > 7) {
-                b = Math.min(current.my_money/2 + 1, Math.min(current.my_money, current.opponent_money));
-            } else if (predictedOpponentCard > 4) {
-                b = Math.min(current.my_money/3 + 1, Math.min(current.my_money, current.opponent_money));
-            } else {
-                b = Math.min(current.my_money/4 + 1, Math.min(current.my_money, current.opponent_money));
+            // 自分のカードが強いほど、より積極的にビッドする（ただし上限はMAX_BID_LIMIT）
+            if (myCardValue >= 8) { // 自分のカードが非常に強い
+                b = Math.min(current.my_money / 2 + 1, Math.min(current.my_money, current.opponent_money));
+            } else if (myCardValue >= 6) { // 自分のカードが中程度に強い
+                b = Math.min(current.my_money / 3 + 1, Math.min(current.my_money, current.opponent_money));
+            } else { // 自分のカードが弱い
+                b = Math.min(current.my_money / 4 + 1, Math.min(current.my_money, current.opponent_money));
             }
+            // 相手の予測カードも考慮して調整
+            if (predictedOpponentCard < 5) { // 相手のカードが弱いと予測される場合、少し強気に
+                b = Math.min(b + 1, Math.min(current.my_money, current.opponent_money));
+            }
+
+            b = Math.min(b, MAX_BID_LIMIT); // 計算されたビッドを最大値制限に合わせる
         }
 
-        // ビッド額のチェック
+        // 最終的なビッド額のチェック (残金を超えない、最低1を保証)
         if (b > current.opponent_money) b = current.opponent_money;
         if (b > current.my_money) b = current.my_money;
         if (b < 1) b = 1; // 最低ビッド額保証
@@ -60,35 +70,40 @@ public class KnowledgeClass {
     }
 
     public String decision() {
-        decision = "n";
+        decision = "n"; // 初期化
+
+        int myCardValue = Character.getNumericValue(current.my_card);
+        int opponentCardValue = Character.getNumericValue(current.opponent_card); // 相手のカードは通常不明だが、比較のためにint化
 
         // 30ラウンドごとのランダム干渉
         if (roundCounter % 30 == 0) {
             return random.nextBoolean() ? "c" : "d";
         }
 
-        // フェーズ1: 保守戦略 (生存優先)
-        if (roundCounter <= 20) {
-            // 相手のカードが強い or ビッド額が自己資金の1/3超ならドロップ
-            if (current.opponent_card > current.my_card || 
-                current.opponent_bid > current.my_money/3) {
-                decision = "d";
+        // フェーズ1: 極めて保守的な戦略 (生存優先)
+        if (roundCounter <= DEFENSIVE_ROUNDS_LIMIT) {
+            // 自分のカードが8または9の場合のみコールを検討
+            // それ以外は常にドロップしてリスクを最小化
+            if (myCardValue >= 8) {
+                decision = "c"; // 強いカードならコール
             } else {
-                decision = "c";
+                decision = "d"; // それ以外はドロップ
             }
-        } 
-        // フェーズ2: 学習反演戦略
+        }
+        // フェーズ2: 学習反演戦略 (20ラウンド以降)
         else {
             int predictedOpponentCard = predictOpponentCard();
-            
+
             // 相手の行動パターン分析
             boolean isBluffing = detectBluffPattern();
-            
-            // 相手のカードが強く、ブラフでない場合はドロップ
-            if (predictedOpponentCard > current.my_card && !isBluffing) {
+
+            // 相手の予測カードが自分のカードより強く、かつブラフではない場合ドロップ
+            // または、自分のカードが非常に弱く、相手のビッドが高い場合もドロップを検討
+            if ((predictedOpponentCard > myCardValue && !isBluffing) ||
+                (myCardValue <= 3 && current.opponent_bid > current.my_money / 3)) {
                 decision = "d";
             } else {
-                decision = "c";
+                decision = "c"; // それ以外はコール
             }
         }
 
@@ -97,50 +112,58 @@ public class KnowledgeClass {
 
     // 相手のカード予測メソッド
     private int predictOpponentCard() {
-        // 相手のビッド額とカードの相関分析
         int sameBidCount = 0;
         int cardSum = 0;
-        
+
         for (InfoClass h : history) {
-            if (h.opponent_bid == current.opponent_bid && h.opponent_card > 0) {
-                sameBidCount++;
-                cardSum += h.opponent_card;
+            // 履歴のopponent_cardが有効な数字文字('1'〜'9')であり、かつビッド額が一致する場合のみ考慮
+            if (h.opponent_card != '0' && h.opponent_bid == current.opponent_bid) {
+                int historicalOpponentCard = Character.getNumericValue(h.opponent_card);
+                if (historicalOpponentCard >= 1 && historicalOpponentCard <= 9) { // 実際のカード値の範囲チェック
+                    sameBidCount++;
+                    cardSum += historicalOpponentCard;
+                }
             }
         }
-        
-        // デフォルト値5（中央値）
+
+        // データがない場合は中央値5を返す
         return sameBidCount > 0 ? cardSum / sameBidCount : 5;
     }
 
     // ブラフ検出メソッド
     private boolean detectBluffPattern() {
-        int highBidLowCard = 0;
-        int totalCases = 0;
-        
+        int highBidLowCardCount = 0;
+        int totalAnalyzedCases = 0;
+
         for (InfoClass h : history) {
-            // カード情報が有効な場合のみ分析
-            if (h.opponent_card > 0 && h.opponent_bid > 0) {
-                // 低カード(1-5)で高ビッド(自己資金の1/3超)を検出
-                if (h.opponent_card < 6 && h.opponent_bid > h.opponent_money/3) {
-                    highBidLowCard++;
+            // カード情報とビッド情報が有効な場合のみ分析
+            if (h.opponent_card != '0' && h.opponent_bid > 0) {
+                int historicalOpponentCard = Character.getNumericValue(h.opponent_card);
+                if (historicalOpponentCard >= 1 && historicalOpponentCard <= 9) {
+                    // 低カード(1-5)で高ビッド(自己資金の1/3超)を検出
+                    if (historicalOpponentCard <= 5 && h.opponent_bid > h.opponent_money / 3) {
+                        highBidLowCardCount++;
+                    }
+                    totalAnalyzedCases++;
                 }
-                totalCases++;
             }
         }
-        
-        // 50%超でブラフ判定
-        return totalCases > 2 && highBidLowCard * 2 > totalCases;
+
+        // 十分なデータがあり、かつブラフの傾向が高い場合（50%超）
+        return totalAnalyzedCases > 3 && highBidLowCardCount * 2 > totalAnalyzedCases;
     }
 
+    // historyに直前のゲーム情報 previous を格納する
     private void HistoryUpdate() {
-        // 履歴をシフト
+        // 履歴をシフト（最古の情報を破棄）
         for (int i = history.length - 2; i >= 0; i--) {
             history[i + 1] = CopyInfo(history[i]);
         }
-        // 直前のゲーム情報を履歴に追加
+        // 直前のゲーム情報を履歴の最新に追加
         history[0] = CopyInfo(previous);
     }
 
+    // InfoClassのインスタンスをコピーする
     private InfoClass CopyInfo(InfoClass info) {
         InfoClass tmpInfo = new InfoClass();
         tmpInfo.my_bid = info.my_bid;
