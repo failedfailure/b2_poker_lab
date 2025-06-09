@@ -16,7 +16,20 @@ public class KnowledgeClass {
     private final int DEFENSIVE_ROUNDS_LIMIT = 20; // 守備的に振る舞うラウンド数
     private final int MAX_BID_LIMIT = 5; // ビッド額の最大値
 
+    // 新しいパラメータ: AIの攻撃性レベル (1:非常に保守的 ～ 5:非常に攻撃的)
+    private int aggressionLevel; // 1 to 5
+
+    // デフォルトコンストラクタ (中程度の攻撃性)
     KnowledgeClass() {
+        this(3); // デフォルトは中程度の攻撃性レベル3
+    }
+
+    // 攻撃性レベルを設定するコンストラクタ
+    public KnowledgeClass(int aggressionLevel) {
+        if (aggressionLevel < 1) this.aggressionLevel = 1;
+        else if (aggressionLevel > 5) this.aggressionLevel = 5;
+        else this.aggressionLevel = aggressionLevel;
+
         for (int i = 0; i < history.length; i++) {
             history[i] = new InfoClass();
         }
@@ -92,32 +105,34 @@ public class KnowledgeClass {
             int predictedOpponentCardStandardRank = predictOpponentCard();
 
             // 自分のカードの強さに応じて、ビッド額を1からMAX_BID_LIMITの範囲でマッピング
-            // 最高ランクのカード（Ace, 内部14）でMAX_BID_LIMIT（5）になるようにする
-            // 内部ランクの最小値は2 (カードの2), 最大値は14 (カードのA)
             if (myCardStandardRank < getStandardRankValue(2)) { // 例えば InfoClassの0 (不明) の場合
                 b = 1; // 無効なカードの場合は最小ビッドに設定
             } else {
                 // 改良されたスケーリング: 2(Deuce)から14(Ace)の内部ランクを1からMAX_BID_LIMITまで均等にマッピング
-                // 範囲 [2, 14] を [1, 5] にマッピングする
-                b = 1 + (int) Math.round(((double)(myCardStandardRank - getStandardRankValue(2)) / (getStandardRankValue(1) - getStandardRankValue(2))) * (MAX_BID_LIMIT - 1));
+                // 攻撃性レベルに応じて、ビッドの傾きを調整
+                double bidScaleFactor = (MAX_BID_LIMIT - 1) * (1.0 + (aggressionLevel - 3) * 0.1); // 中立(3)で1.0倍, 低(1)で0.8倍, 高(5)で1.2倍
+                b = 1 + (int) Math.round(((double)(myCardStandardRank - getStandardRankValue(2)) / (getStandardRankValue(1) - getStandardRankValue(2))) * bidScaleFactor);
                 b = Math.max(1, b); // 少なくとも1であることを保証
             }
 
             // 相手の予測カードや状況に応じて微調整
-            // 予測ランクが有効な場合のみ適用
             if (predictedOpponentCardStandardRank > 0) {
                 if (predictedOpponentCardStandardRank < myCardStandardRank) {
                     // 相手のカードが自分より弱いと予測される場合: 強気にビッドを上げる
-                    // 差が大きいほど、より積極的に上げる
-                    b = Math.min(b + (myCardStandardRank - predictedOpponentCardStandardRank) / 3, MAX_BID_LIMIT);
+                    // 攻撃性が高いほど、より積極的に上げる
+                    int aggressionModifier = (aggressionLevel - 1); // 0 (保守的) から 4 (攻撃的)
+                    b = Math.min(b + (myCardStandardRank - predictedOpponentCardStandardRank) / Math.max(1, (4 - aggressionModifier)), MAX_BID_LIMIT);
                 } else if (predictedOpponentCardStandardRank >= myCardStandardRank) {
                     // 相手のカードが自分と同等か強いと予測される場合:
                     // 自分のカードが弱めだが、相手がブラフしている可能性がある場合に、ブラフでビッドを上げるチャンス
-                    if (myCardStandardRank <= getStandardRankValue(5) && detectBluffPattern() && random.nextDouble() < 0.4) { // 40%の確率でブラフビッド (カード5以下)
-                         b = Math.min(b + random.nextInt(2) + 1, MAX_BID_LIMIT); // 1-2だけ高くビッド
+                    double bluffChance = 0.3 + (aggressionLevel - 1) * 0.05; // 攻撃性が高いほどブラフ率UP (0.3 -> 0.5)
+                    if (myCardStandardRank <= getStandardRankValue(5) && detectBluffPattern() && random.nextDouble() < bluffChance) {
+                         b = Math.min(b + random.nextInt(aggressionLevel) + 1, MAX_BID_LIMIT); // 攻撃性レベルが高いほど、より大きくブラフビッド
                     } else {
-                        // それ以外は少し保守的になる（ビッドを下げることがないよう最低1は維持）
-                        b = Math.max(1, b - random.nextInt(2)); // 0-1だけ下げる
+                        // それ以外は少し保守的になる
+                        int conservativeReduction = random.nextInt(2); // 0-1だけ下げる
+                        if (aggressionLevel <= 2) conservativeReduction = random.nextInt(3); // 保守的ならもっと下げる
+                        b = Math.max(1, b - conservativeReduction);
                     }
                 }
             }
@@ -149,14 +164,13 @@ public class KnowledgeClass {
 
         int myCardStandardRank = getStandardRankValue(current.my_card);
 
-        // 30ラウンドごとのランダム干渉
+        // 30ラウンドごとのランダム干渉 (攻撃性レベルの影響を受けない)
         if (roundCounter % 30 == 0) {
             return random.nextBoolean() ? "c" : "d";
         }
 
         // フェーズ1: 極めて保守的な戦略 (生存優先)
         if (roundCounter <= DEFENSIVE_ROUNDS_LIMIT) {
-            // 自分のカードが'A'以上の標準ランク（つまり'A'）の場合のみコールを検討
             if (myCardStandardRank >= getStandardRankValue(1)) { // InfoClassの1 (Ace)
                 decision = "c"; // 強いカードならコール
             } else {
@@ -173,33 +187,34 @@ public class KnowledgeClass {
 
             // ドロップする条件：
             // 1. 相手の予測カード（標準ランク）が自分のカード（標準ランク）より強く、かつブラフではない場合
+            double dropChanceStrongerOpponent = 0.85 - (aggressionLevel - 1) * 0.1; // 攻撃性が高いほどドロップ率DOWN (0.85 -> 0.45)
             if (predictedOpponentCardStandardRank > myCardStandardRank && !isBluffing) {
-                // 強い相手には基本的にドロップするが、わずかな確率でコールして unpredictability を高める
-                if (random.nextDouble() < 0.85) { // 85%の確率でドロップ
+                if (random.nextDouble() < dropChanceStrongerOpponent) {
                     decision = "d";
                 } else {
-                    decision = "c"; // 15%の確率で強気コール
+                    decision = "c";
                 }
             }
-            // 2. 自分のカードが非常に弱く（例: Card 3以下）、相手のビッドが自己資金の1/3を超える場合（ブラフでなくてもリスクが高すぎる）
-            else if (myCardStandardRank <= getStandardRankValue(3) && current.opponent_bid > current.my_money / 3) { // InfoClassの3 (Card 3)
-                if (random.nextDouble() < 0.7) { // 70%の確率でドロップ
+            // 2. 自分のカードが非常に弱く（例: Card 3以下）、相手のビッドが自己資金の1/3を超える場合
+            double dropChanceWeakCardHighBid = 0.7 - (aggressionLevel - 1) * 0.1; // 攻撃性が高いほどドロップ率DOWN (0.7 -> 0.3)
+            if (myCardStandardRank <= getStandardRankValue(3) && current.opponent_bid > current.my_money / 3) { // InfoClassの3 (Card 3)
+                if (random.nextDouble() < dropChanceWeakCardHighBid) {
                     decision = "d";
                 } else {
-                    decision = "c"; // 30%の確率でリスクコール
+                    decision = "c";
                 }
             }
-            // それ以外の場合は基本的にはコール（デフォルト）
 
             // ブラフが検出された場合、コールに強く傾倒する
             if (isBluffing) {
                 // ただし、自分のカードが非常に弱く（例: Card 4以下）、相手のビッドが自己資金の半分を超えるような極端な状況では、
                 // ブラフであってもドロップする可能性も残す
+                double dropChanceDesperateBluff = 0.6 - (aggressionLevel - 1) * 0.1; // 攻撃性が高いほどドロップ率DOWN (0.6 -> 0.2)
                 if (myCardStandardRank <= getStandardRankValue(4) && current.opponent_bid > current.my_money / 2) { // InfoClassの4 (Card 4)
-                    if (random.nextDouble() < 0.6) { // 60%の確率でドロップ
+                    if (random.nextDouble() < dropChanceDesperateBluff) {
                         decision = "d";
                     } else {
-                        decision = "c"; // 40%の確率でブラフをコール
+                        decision = "c";
                     }
                 } else {
                     decision = "c"; // それ以外の場合はブラフをほぼ確実にコール
